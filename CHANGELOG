@@ -1,4 +1,13 @@
-version 1.7.2
+version 1.7.2 (19 May 2026)
+	- radiation_general_cloud_optics_data: fix non-automatic allocation on
+	  assignment
+	- ecrad_ifs/ecrad_ifs_blocked: fix use of unallocated arrays
+	- Add public specifiers in new radiation_liquid_optics_jahangir/nielsen
+	- Combined yomlun.F90 and yomlun_ifsaux.F90 into yomlun_ecrad.F90
+	- Renamed YOMCST to YOMCST_ECRAD
+	- Improved output validation tests for single-precision and additional
+	  reference output files
+	- Refactored compiler flag composition in CMake
 	- Optionally read reference_total_solar_irradiance from solar
 	  ecCKD gas optics files in case the file is not intended to span
 	  the entire solar spectrum
