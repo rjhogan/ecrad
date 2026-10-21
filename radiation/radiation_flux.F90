@@ -108,6 +108,11 @@ module radiation_flux
      real(jprb), pointer, dimension(:,:) :: &
           &  lw_derivatives=>null()
 
+     ! shortwave down direct radiation at surface without delta Eddington
+     ! dims: col
+     real(jprb), pointer, dimension(:) :: &
+          &  sw_dn_direct_true=>null(), sw_dn_direct_true_clear=>null()
+
    contains
      procedure :: allocate   => allocate_flux_type
      procedure :: deallocate => deallocate_flux_type
@@ -207,6 +212,12 @@ contains
       allocate(this%sw_dn(istartcol:iendcol,nlev+1))
       if (config%do_sw_direct) then
         allocate(this%sw_dn_direct(istartcol:iendcol,nlev+1))
+      end if
+      if (config%do_sw_direct_true) then
+        allocate(this%sw_dn_direct_true(istartcol:iendcol))
+        if(config%do_clear) then
+          allocate(this%sw_dn_direct_true_clear(istartcol:iendcol))
+        end if
       end if
       if (config%do_clear) then
         allocate(this%sw_up_clear(istartcol:iendcol,nlev+1))
@@ -352,6 +363,14 @@ contains
       if (associated(this%sw_dn_direct_clear)) then
         deallocate(this%sw_dn_direct_clear)
         this%sw_dn_direct_clear=>null()
+      end if
+      if (associated(this%sw_dn_direct_true)) then
+        deallocate(this%sw_dn_direct_true)
+        this%sw_dn_direct_true=>null()
+      end if
+      if (associated(this%sw_dn_direct_true_clear)) then
+        deallocate(this%sw_dn_direct_true_clear)
+        this%sw_dn_direct_true_clear=>null()
       end if
     end if
 
@@ -755,7 +774,7 @@ contains
   function out_of_physical_bounds(this, istartcol, iendcol) result(is_bad)
 
     use yomhook,          only : lhook, dr_hook, jphook
-    use radiation_check,  only : out_of_bounds_2d
+    use radiation_check,  only : out_of_bounds_2d, out_of_bounds_1d
 
     class(flux_type), intent(inout) :: this
     integer, optional,intent(in) :: istartcol, iendcol
@@ -775,6 +794,12 @@ contains
          &                       .false., j1=istartcol, j2=iendcol) &
          & .or. out_of_bounds_2d(this%sw_dn_surf_clear_band, 'sw_dn_surf_clear_band', 0.0_jprb, 1500.0_jprb, &
          &                       .false., j1=istartcol, j2=iendcol)
+    if (associated(this%sw_dn_direct_true)) &
+         is_bad = is_bad  .or. out_of_bounds_1d(this%sw_dn_direct_true, &
+              &  'sw_dn_direct_true', 0.0_jprb, 1500.0_jprb, .false., i1=istartcol, i2=iendcol)
+    if (associated(this%sw_dn_direct_true_clear)) &
+         is_bad = is_bad  .or. out_of_bounds_1d(this%sw_dn_direct_true_clear, &
+              &  'sw_dn_direct_true_clear', 0.0_jprb, 1500.0_jprb, .false., i1=istartcol, i2=iendcol)
 
     if (lhook) call dr_hook('radiation_flux:out_of_physical_bounds',1,hook_handle)
 

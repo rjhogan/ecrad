@@ -204,6 +204,13 @@ test_diag:
 		gas_optics_sw_override_file_name='"ecckd-1.4_sw_climate_vfine-96b_ckd-definition.nc"'
 	$(DRIVER) config_ecckd_diag.nam $(INPUT).nc $(INPUT)_ecckd_diag_vfine_out.nc
 
+# True direct beam
+
+test_direct_true:
+	$(CHANGENAM) $(CONFIG) config_direct_true.nam \
+		do_sw_direct_true=true
+	$(DRIVER) config_direct_true.nam $(INPUT).nc $(INPUT)_direct_true_out.nc
+
 # Clean data files
 clean:
 	rm -f *_out.nc tmp*.nc radiative_properties*.nc inputs.nc sw_diag*nc \
