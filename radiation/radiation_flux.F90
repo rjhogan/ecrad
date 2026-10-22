@@ -108,10 +108,13 @@ module radiation_flux
      real(jprb), pointer, dimension(:,:) :: &
           &  lw_derivatives=>null()
 
-     ! shortwave down direct radiation at surface without delta Eddington
-     ! dims: col
-     real(jprb), pointer, dimension(:) :: &
-          &  sw_dn_direct_true=>null(), sw_dn_direct_true_clear=>null()
+     ! Shortwave down direct radiation at surface for various
+     ! pyrheliometer opening angles, dimensioned (ncol,ndirect)
+     real(jprb), pointer, dimension(:,:) :: sw_dn_direct_true=>null()
+     ! Clear-sky equivalent, for unscattered radiation only (no
+     ! small-angle forward scattering so no dependence on opening
+     ! angle)
+     real(jprb), pointer, dimension(:)   :: sw_dn_direct_true_clear=>null()
 
    contains
      procedure :: allocate   => allocate_flux_type
@@ -214,7 +217,7 @@ contains
         allocate(this%sw_dn_direct(istartcol:iendcol,nlev+1))
       end if
       if (config%do_sw_direct_true) then
-        allocate(this%sw_dn_direct_true(istartcol:iendcol))
+        allocate(this%sw_dn_direct_true(istartcol:iendcol,config%ndirect))
         if(config%do_clear) then
           allocate(this%sw_dn_direct_true_clear(istartcol:iendcol))
         end if
@@ -795,7 +798,7 @@ contains
          & .or. out_of_bounds_2d(this%sw_dn_surf_clear_band, 'sw_dn_surf_clear_band', 0.0_jprb, 1500.0_jprb, &
          &                       .false., j1=istartcol, j2=iendcol)
     if (associated(this%sw_dn_direct_true)) &
-         is_bad = is_bad  .or. out_of_bounds_1d(this%sw_dn_direct_true, &
+         is_bad = is_bad  .or. out_of_bounds_2d(this%sw_dn_direct_true, &
               &  'sw_dn_direct_true', 0.0_jprb, 1500.0_jprb, .false., i1=istartcol, i2=iendcol)
     if (associated(this%sw_dn_direct_true_clear)) &
          is_bad = is_bad  .or. out_of_bounds_1d(this%sw_dn_direct_true_clear, &

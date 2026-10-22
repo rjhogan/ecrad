@@ -219,7 +219,7 @@ contains
        &  config, thermodynamics, cloud, &
        &  od_lw_cloud, ssa_lw_cloud, g_lw_cloud, &
        &  od_sw_cloud, ssa_sw_cloud, g_sw_cloud, &
-       &  od_sw_true)
+       &  od_sw_cloud_true,  theta2_cloud)
 
     use parkind1, only           : jprb
     use yomhook,  only           : lhook, dr_hook, jphook
@@ -232,7 +232,7 @@ contains
          &                       ILiquidModelJahangir,ILiquidModelNielsen
     use radiation_thermodynamics, only    : thermodynamics_type
     use radiation_cloud, only             : cloud_type
-    use radiation_constants, only         : AccelDueToGravity
+    use radiation_constants, only         : AccelDueToGravity, Pi
     use radiation_ice_optics_fu, only     : calc_ice_optics_fu_sw, &
          &                                  calc_ice_optics_fu_lw
     use radiation_ice_optics_baran, only  : calc_ice_optics_baran, &
@@ -266,6 +266,12 @@ contains
     real(jprb), dimension(config%n_bands_sw,nlev,istartcol:iendcol), intent(out) :: &
          &   od_sw_cloud, ssa_sw_cloud, g_sw_cloud
 
+    ! Optional output for "true" direct shortwave diagnostic: cloud
+    ! optical depth without delta Eddington adjustment, and variance
+    ! of forward scattering angle (radians^2)
+    real(jprb), dimension(config%n_bands_sw_if_direct_true,nlev,istartcol:iendcol), &
+         &  intent(out) :: od_sw_cloud_true, theta2_cloud
+    
     ! Longwave and shortwave optical depth, scattering optical depth
     ! and asymmetry factor, for liquid and ice in all bands but a
     ! single cloud layer
@@ -275,9 +281,14 @@ contains
     real(jprb), dimension(config%n_bands_sw) :: &
          &  od_sw_liq, scat_od_sw_liq, g_sw_liq, &
          &  od_sw_ice, scat_od_sw_ice, g_sw_ice
-    real(jprb), dimension(config%n_bands_sw_if_direct_true,nlev,istartcol:iendcol),intent(inout) :: &
-         &  od_sw_true
 
+    ! Squared wavelength divided by pi squared for each band (m2),
+    ! only needed if we are calculating "true" direct shortwave fluxes
+    real(jprb), dimension(config%n_bands_sw_if_direct_true) :: wavelength2_pi2
+    ! Equivalent-area radius of ice, which we parameterize as a
+    ! function of effective radius
+    real(jprb) :: ra_ice
+    
     ! In-cloud water path of cloud liquid or ice (i.e. liquid or ice
     ! gridbox-mean water path divided by cloud fraction); kg m-2
     real(jprb) :: lwp_in_cloud, iwp_in_cloud
@@ -299,12 +310,22 @@ contains
       write(nulout,'(a)') 'Computing cloud absorption/scattering properties'
     end if
 
+    if (config%do_sw_direct_true) then
+      ! Compute squared wavelength divided by pi square from the mean
+      ! wavenumber (cm-1) of each band
+      wavelength2_pi2 = (0.02_jprb / (Pi * (config%gas_optics_sw%spectral_def%wavenumber1_band &
+           &                              + config%gas_optics_sw%spectral_def%wavenumber2_band))) ** 2
+    end if
+    
     associate(ho => config%cloud_optics)
 
       ! Array-wise assignment
       od_lw_cloud  = 0.0_jprb
       od_sw_cloud  = 0.0_jprb
-      if (config%do_sw_direct_true) od_sw_true   = 0.0_jprb
+      if (config%do_sw_direct_true) then
+        od_sw_cloud_true = 0.0_jprb
+        theta2_cloud     = 0.0_jprb
+      end if
       ssa_sw_cloud = 0.0_jprb
       g_sw_cloud   = 0.0_jprb
       if (config%do_lw_cloud_scattering) then
@@ -365,7 +386,11 @@ contains
               end if
 
               if (config%do_sw_direct_true) then
-                od_sw_true(:,jlev,jcol) = od_sw_true(:,jlev,jcol) + od_sw_liq
+                od_sw_cloud_true(:,jlev,jcol) = od_sw_cloud_true(:,jlev,jcol) + od_sw_liq
+                ! The radius required is the equivalent-area radius
+                ! but for liquid water clouds this is equal to the
+                ! effective radius
+                theta2_cloud(:,jlev,jcol)     = wavelength2_pi2 / cloud%re_liq(jcol,jlev)**2
               end if
 
               ! Delta-Eddington scaling in the shortwave only
@@ -465,7 +490,15 @@ contains
               end if
 
               if (config%do_sw_direct_true) then
-                od_sw_true(:,jlev,jcol) = od_sw_true(:,jlev,jcol) + od_sw_ice
+                ! Parameterization of equivalent-area radius for ice clouds
+                ra_ice = cloud%re_ice(jcol,jlev) * (1.0_jprb + 0.004054_jprb &
+                     &  *max(0.0_jprb, (cloud%re_ice(jcol,jlev)*1.0e6_jprb - 28.0_jprb))**1.68_jprb)
+                ! Weighted average of liquid and ice values according to optical depths
+                theta2_cloud(:,jlev,jcol) = (od_sw_cloud_true(:,jlev,jcol) * theta2_cloud(:,jlev,jcol) &
+                     &                      +od_sw_ice * wavelength2_pi2 / ra_ice**2) &
+                     &                    / (od_sw_cloud_true(:,jlev,jcol) + od_sw_ice)
+                ! Sum liquid and ice optical depths
+                od_sw_cloud_true(:,jlev,jcol) = od_sw_cloud_true(:,jlev,jcol) + od_sw_ice
               end if
 
               ! Delta-Eddington scaling in both longwave and shortwave

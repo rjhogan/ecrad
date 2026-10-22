@@ -24,6 +24,7 @@ module radiation_constants
   ! Rename some constants from their cryptic IFS names
   real(jprb), parameter :: Pi                 = 3.14159265358979323846_jprb
   real(jprb), parameter :: AccelDueToGravity  = 9.80665_jprb! m s-2
+  real(jprb), parameter :: SolarAngularRadius = 0.004625_jprb ! radians corresponding to 0.53deg/2
   real(jprb), parameter :: StefanBoltzmann    = 5.67037321e-8_jprb ! W m-2 K-4
   real(jprb), parameter :: DensityLiquidWater = 1000.0_jprb ! kg m-3
   real(jprb), parameter :: DensitySolidIce    = 916.7_jprb  ! kg m-3

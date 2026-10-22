@@ -42,20 +42,21 @@ contains
        &  config, single_level, cloud, & 
        &  od, ssa, g, od_cloud, ssa_cloud, g_cloud, &
        &  albedo_direct, albedo_diffuse, incoming_sw, &
-       &  od_true, od_cloud_true, flux)
+       &  od_true, od_cloud_true, theta2_cloud, flux)
 
     use parkind1, only           : jprb
     use yomhook,  only           : lhook, dr_hook, jphook
 
     use radiation_io,   only           : nulerr, radiation_abort
-    use radiation_config, only         : config_type
+    use radiation_config, only         : config_type, NDirectAcceptanceAngles
     use radiation_single_level, only   : single_level_type
     use radiation_cloud, only          : cloud_type
     use radiation_flux, only           : flux_type
     use radiation_two_stream, only     : calc_ref_trans_sw
     use radiation_adding_ica_sw, only  : adding_ica_sw
     use radiation_cloud_generator, only: cloud_generator
-
+    use radiation_constants, only      : Pi, SolarAngularRadius
+    
     implicit none
 
     ! Inputs
@@ -81,11 +82,13 @@ contains
     real(jprb), intent(in), dimension(config%n_g_sw,istartcol:iendcol) :: &
          &  albedo_direct, albedo_diffuse, incoming_sw
 
-    ! True (no delta-Eddington) direct optical depth
+    ! True (no delta-Eddington) direct optical depth and angular
+    ! variance of forward-scattered light
     real(jprb), intent(in), dimension(config%n_g_sw_if_direct_true,nlev,istartcol:iendcol) :: &
-         & od_true
-    real(jprb), intent(in), dimension(config%n_bands_sw_if_direct_true,nlev,istartcol:iendcol)   :: &
-         &  od_cloud_true
+         &  od_true
+    real(jprb), intent(in), dimension(config%n_bands_sw_if_direct_true,nlev,istartcol:iendcol) :: &
+         &  od_cloud_true, theta2_cloud
+    
     ! Output
     type(flux_type), intent(inout):: flux
 
@@ -108,9 +111,14 @@ contains
     ! Fluxes per g point
     real(jprb), dimension(config%n_g_sw, nlev+1) :: flux_up, flux_dn_diffuse, flux_dn_direct
 
-    ! direct true at the surface, spectral dimension only
-    real(jprb), dimension(config%n_g_sw_if_direct_true):: flux_dn_direct_true, flux_dn_direct_true_clear
+    ! Direct true at the surface, spectral dimension only
+    real(jprb), dimension(config%n_g_sw_if_direct_true) :: flux_dn_direct_true, flux_dn_direct_true_clear
     real(jprb), dimension(config%n_g_sw_if_direct_true) :: od_total_true
+    ! ...with the small-angle forward scattered component as well
+    real(jprb), dimension(config%n_g_sw_if_direct_true) :: flux_dn_direct_with_fwd, od_total_with_fwd
+    real(jprb), dimension(config%n_g_sw_if_direct_true) :: flux_dn_direct_detected
+    ! Angular variance of the small-angle forward scattering
+    real(jprb), dimension(config%n_g_sw_if_direct_true) :: angular_variance
 
     ! Combined gas+aerosol+cloud optical depth, single scattering
     ! albedo and asymmetry factor
@@ -137,11 +145,15 @@ contains
     real(jprb) :: sum_up, sum_dn_diff, sum_dn_dir
 #endif
 
+    ! Squared direct acceptance half-angle for the "true"
+    ! direct flux calculation (radians squared)
+    real(jprb) :: direct_acceptance_half_angle_sqr(NDirectAcceptanceAngles)
+    
     ! Number of g points
     integer :: ng
 
     ! Loop indices for level, column and g point
-    integer :: jlev, jcol, jg
+    integer :: jlev, jcol, jg, jdir
 
     real(jphook) :: hook_handle
 
@@ -154,6 +166,14 @@ contains
 
     ng = config%n_g_sw
 
+    if (config%do_sw_direct_true) then
+      do jdir = 1,config%ndirect
+        direct_acceptance_half_angle_sqr(jdir) &
+             &  = (config%direct_acceptance_angle_deg(jdir) &
+             &     * 0.5_jprb * Pi / 180.0_jprb ) ** 2
+      end do
+    end if
+    
     ! Loop through columns
     do jcol = istartcol,iendcol
       ! Only perform calculation if sun above the horizon
@@ -195,7 +215,7 @@ contains
           flux_dn_direct_true_clear(:) = incoming_sw(:,jcol)
           do jlev = 1, nlev
             flux_dn_direct_true_clear(:) = flux_dn_direct_true_clear(:) * &
-              & exp(-od_true(:,jlev,jcol) / cos_sza)
+              &  exp(-od_true(:,jlev,jcol) / cos_sza)
           end do
         end if
         
@@ -261,7 +281,9 @@ contains
         if (total_cloud_cover >= config%cloud_fraction_threshold) then
           ! Total-sky calculation
           if (config%do_sw_direct_true) then
-            flux_dn_direct_true(:) = incoming_sw(:,jcol)
+            flux_dn_direct_true(:)     = incoming_sw(:,jcol)
+            flux_dn_direct_with_fwd(:) = incoming_sw(:,jcol)
+            angular_variance(:)        = 0.5_jprb * SolarAngularRadius**2
           end if
 
           do jlev = 1,nlev
@@ -291,8 +313,8 @@ contains
                   end if
                 end if
                 if (config%do_sw_direct_true) then
-                    od_total_true(jg) = od_true(jg,jlev,jcol) + od_scaling(jg,jlev) * &
-                       &  od_cloud_true(config%i_band_from_reordered_g_sw(jg),jlev,jcol)
+                  od_total_true(jg)     = od_true(jg,jlev,jcol) + od_cloud_new(jg)
+                  od_total_with_fwd(jg) = od_true(jg,jlev,jcol) + 0.5_jprb * od_cloud_new(jg)
                 end if
               end do
 
@@ -321,14 +343,22 @@ contains
               end do
               if (config%do_sw_direct_true) then
                 do jg = 1,ng
-                  od_total_true(jg) = od_true (jg,jlev,jcol)
+                  od_cloud_new(jg)      = 0.0_jprb
+                  od_total_true(jg)     = od_true(jg,jlev,jcol)
+                  od_total_with_fwd(jg) = od_true(jg,jlev,jcol)
                 end do
               end if
 
             end if
             if (config%do_sw_direct_true) then
-                flux_dn_direct_true(:) = flux_dn_direct_true(:) * &
-                  & exp(-od_total_true(:) / cos_sza)
+              do jg = 1,ng
+                flux_dn_direct_true(jg) = flux_dn_direct_true(jg) &
+                  &  * exp(-od_total_true(jg) / cos_sza)
+                flux_dn_direct_with_fwd(jg) = flux_dn_direct_with_fwd(jg) &
+                     &  * exp(-od_total_with_fwd(jg) / cos_sza)
+                angular_variance(jg) = angular_variance(jg) + 0.5_jprb * od_cloud_new(jg) &
+                     &  * theta2_cloud(config%i_band_from_reordered_g_sw(jg),jlev,jcol)
+              end do
             end if
           end do
             
@@ -373,8 +403,23 @@ contains
 #endif
           if (config%do_sw_direct_true) then
             flux%sw_dn_direct_true_clear(jcol) = sum(flux_dn_direct_true_clear) * cos_sza
-            flux%sw_dn_direct_true(jcol) = total_cloud_cover * sum(flux_dn_direct_true) * cos_sza &
-                &  + (1.0_jprb - total_cloud_cover) * flux%sw_dn_direct_true_clear(jcol)
+            ! Remove unscattered component from angular variance, to
+            ! leave the angular variance purely due to small-angle
+            ! scattering
+            angular_variance = (flux_dn_direct_with_fwd * angular_variance &
+                 &             -flux_dn_direct_true * 0.5_jprb * SolarAngularRadius**2) &
+                 &             /max(1.0e-24_jprb, flux_dn_direct_with_fwd - flux_dn_direct_true)
+            do jdir = 1,config%ndirect
+              if (direct_acceptance_half_angle_sqr(jdir) == 0) then
+                flux%sw_dn_direct_true(jcol,jdir) = total_cloud_cover * sum(flux_dn_direct_true) * cos_sza &
+                     &  + (1.0_jprb - total_cloud_cover) * flux%sw_dn_direct_true_clear(jcol)
+              else
+                flux_dn_direct_detected = flux_dn_direct_true + (flux_dn_direct_with_fwd - flux_dn_direct_true) &
+                     * (1.0_jprb - exp(-direct_acceptance_half_angle_sqr(jdir)/max(1.0e-24,angular_variance)))
+                flux%sw_dn_direct_true(jcol,jdir) = total_cloud_cover * sum(flux_dn_direct_detected) * cos_sza &
+                     &  + (1.0_jprb - total_cloud_cover) * flux%sw_dn_direct_true_clear(jcol)
+              end if
+            end do
           end if
           ! Cloudy flux profiles currently assume completely overcast
           ! skies; perform weighted average with clear-sky profile
@@ -402,7 +447,9 @@ contains
           ! No cloud in profile and clear-sky fluxes already
           ! calculated: copy them over
           if (config%do_sw_direct_true) then
-            flux%sw_dn_direct_true(jcol) = sum(flux_dn_direct_true_clear) * cos_sza
+            do jdir = 1,config%ndirect
+              flux%sw_dn_direct_true(jcol,jdir) = sum(flux_dn_direct_true_clear) * cos_sza
+            end do
             flux%sw_dn_direct_true_clear(jcol) = sum(flux_dn_direct_true_clear) * cos_sza
           end if
           do jlev = 1, nlev+1
@@ -442,9 +489,12 @@ contains
           flux%sw_dn_direct_surf_clear_g (jg,jcol) = 0.0_jprb
           flux%sw_up_toa_clear_g         (jg,jcol) = 0.0_jprb
         end do
-        if (associated(flux%sw_dn_direct_true)) flux%sw_dn_direct_true(jcol) = 0.0_jprb
-        if (associated(flux%sw_dn_direct_true_clear)) &
-                & flux%sw_dn_direct_true_clear(jcol) = 0.0_jprb
+        if (associated(flux%sw_dn_direct_true)) then
+          flux%sw_dn_direct_true(jcol,:) = 0.0_jprb
+        end if
+        if (associated(flux%sw_dn_direct_true_clear)) then
+          flux%sw_dn_direct_true_clear(jcol) = 0.0_jprb
+        end if
       end if ! sun above horizon
 
     end do ! Loop over columns

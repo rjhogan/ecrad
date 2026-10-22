@@ -135,6 +135,11 @@ contains
            &  size(flux%sw_dn_diffuse_surf_canopy, 1))
     end if
 
+    if (config%do_sw_direct_true) then
+      call out_file%define_dimension("direct_acceptance_angle", &
+           &  config%ndirect)
+    end if
+    
     ! Put global attributes
     call out_file%put_global_attributes( &
          &   title_str="Radiative flux profiles from the ecRad offline radiation model", &
@@ -235,19 +240,21 @@ contains
         call out_file%define_variable("flux_dn_direct_sw", &
              &   dim2_name="column", dim1_name="half_level", &
              &   units_str="W m-2", &
-             &   long_name="Downwelling direct shortwave flux")
+             &   long_name="Downwelling direct shortwave flux (delta-scaled)")
       end if
       if (config%do_sw_direct_true) then
+        call out_file%define_variable("direct_acceptance_angle", &
+             &   dim1_name="direct_acceptance_angle", units_str="degree", &
+             &   long_name="Full-width acceptance angle for true direct flux")
         call out_file%define_variable("flux_dn_direct_sw_true", &
-             &   dim1_name="column", &
+             &   dim2_name="column", dim1_name="direct_acceptance_angle", &
              &   units_str="W m-2", &
-             &   long_name="Downwelling direct shortwave true flux")
-        !only implemented for mcica which works only with clear, so this is not needed
+             &   long_name="Downwelling direct shortwave flux at surface (true)")
         if (config%do_clear) then
           call out_file%define_variable("flux_dn_direct_sw_true_clear", &
                &   dim1_name="column", &
                &   units_str="W m-2", &
-               &   long_name="Downwelling direct shortwave true clear-sky flux")
+               &   long_name="Downwelling direct shortwave clear-sky flux at surface (true)")
         end if
       end if
       if (config%do_clear) then
@@ -263,7 +270,7 @@ contains
           call out_file%define_variable("flux_dn_direct_sw_clear", &
                &   dim2_name="column", dim1_name="half_level", &
                &   units_str="W m-2", &
-               &   long_name="Downwelling clear-sky direct shortwave flux")
+               &   long_name="Downwelling clear-sky direct shortwave flux (delta-scaled)")
         end if
       end if
 
@@ -280,7 +287,7 @@ contains
           call out_file%define_variable("spectral_flux_dn_direct_sw", &
                &   dim3_name="column", dim2_name="half_level", &
                &   dim1_name="band_sw", units_str="W m-2", &
-               &   long_name="Spectral downwelling direct shortwave flux")
+               &   long_name="Spectral downwelling direct shortwave flux (delta-scaled)")
         end if
         if (config%do_clear) then
           call out_file%define_variable("spectral_flux_up_sw_clear", &
@@ -295,7 +302,7 @@ contains
             call out_file%define_variable("spectral_flux_dn_direct_sw_clear", &
                  &   dim3_name="column", dim2_name="half_level", &
                  &   dim1_name="band_sw", units_str="W m-2", &
-                 &   long_name="Spectral downwelling clear-sky direct shortwave flux")
+                 &   long_name="Spectral downwelling clear-sky direct shortwave flux (delta-scaled)")
           end if
         end if
       else if (config%do_surface_sw_spectral_flux) then
@@ -304,14 +311,14 @@ contains
              &   long_name="Spectral downwelling shortwave flux at surface")
         call out_file%define_variable("spectral_flux_dn_direct_sw_surf", &
              &   dim2_name="column", dim1_name="band_sw", units_str="W m-2", &
-             &   long_name="Spectral downwelling direct shortwave flux at surface")
+             &   long_name="Spectral downwelling direct shortwave flux at surface (delta-scaled)")
         if (config%do_clear) then
           call out_file%define_variable("spectral_flux_dn_sw_surf_clear", &
                &   dim2_name="column", dim1_name="band_sw", units_str="W m-2", &
                &   long_name="Spectral downwelling clear-sky shortwave flux at surface")
           call out_file%define_variable("spectral_flux_dn_direct_sw_surf_clear", &
                &   dim2_name="column", dim1_name="band_sw", units_str="W m-2", &
-               &   long_name="Spectral downwelling clear-sky direct shortwave flux at surface")
+               &   long_name="Spectral downwelling clear-sky direct shortwave flux at surface (delta-scaled)")
         end if
       end if
 
@@ -335,7 +342,7 @@ contains
              &   long_name="Surface downwelling diffuse shortwave flux in canopy bands")
         call out_file%define_variable("canopy_flux_dn_direct_sw_surf", &
              &   dim2_name="column", dim1_name="canopy_band_sw", units_str="W m-2", &
-             &   long_name="Surface downwelling direct shortwave flux in canopy bands")
+             &   long_name="Surface downwelling direct shortwave flux in canopy bands (delta-scaled)")
       end if
 
     end if
@@ -400,6 +407,11 @@ contains
       if (config%do_sw_direct) then
         call out_file%put("flux_dn_direct_sw", flux%sw_dn_direct)
       end if
+      if (config%do_sw_direct_true) then
+        call out_file%put("direct_acceptance_angle", &
+             &  config%direct_acceptance_angle_deg(1:config%ndirect))
+        call out_file%put("flux_dn_direct_sw_true", flux%sw_dn_direct_true)
+      end if
       if (config%do_clear) then
         call out_file%put("flux_up_sw_clear", flux%sw_up_clear)
         call out_file%put("flux_dn_sw_clear", flux%sw_dn_clear)
@@ -409,9 +421,6 @@ contains
         if (config%do_sw_direct_true) then
           call out_file%put("flux_dn_direct_sw_true_clear", flux%sw_dn_direct_true_clear)
         end if
-      end if
-      if (config%do_sw_direct_true) then
-        call out_file%put("flux_dn_direct_sw_true", flux%sw_dn_direct_true)
       end if
 
       if (config%do_save_spectral_flux) then

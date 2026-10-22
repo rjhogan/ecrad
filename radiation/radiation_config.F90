@@ -152,6 +152,9 @@ module radiation_config
   ! Length of string buffer for printing config information
   integer, parameter :: NPrintStringLen = 60
 
+  ! Maximum number of direct-beam acceptance half angles
+  integer, parameter :: NDirectAcceptanceAngles = 10
+  
   !---------------------------------------------------------------------
   ! Derived type containing all the configuration information needed
   ! to run the radiation scheme.  The intention is that this is fixed
@@ -279,14 +282,21 @@ module radiation_config
     ! .true. is not compatible with the SPARTACUS solver.
     logical :: do_sw_delta_scaling_with_gases = .false.
 
-    ! Compute diagnostic shortwave direct output with
-    ! no delta eddington applied (0.)
-    ! or for a specific opening angle defining 'direct' radiation
-    ! (angle not implemented yet)
-    ! this feature is off by default
+    ! Compute diagnostic shortwave direct surface fluxes with no
+    ! delta-Eddington applied, but rather with a specific
+    ! pyrheliometer opening angle (or multiple angles) defining
+    ! 'direct' radiation.
     logical    :: do_sw_direct_true = .false.
-    real(jprb) :: direct_true_angle = 0.0_jprb
-
+    ! Acceptance full-angles in degrees. If this is 0 then it will
+    ! return the "true" direct unscattered beam; if greater than 0 it
+    ! will include also forward scattered light from clouds (but not
+    ! aerosols) that is within the field-of-view of a pyrheliometer
+    ! with that opening angle. If this is not set but
+    ! do_sw_direct_true=.true. then a single angle of 0 will be set.
+    real(jprb) :: direct_acceptance_angle_deg(NDirectAcceptanceAngles) = -1.0_jprb
+    ! Number of direct fluxes to compute
+    integer    :: ndirect
+    
     ! Codes describing the gas model
     integer :: i_gas_model_sw = IGasModelIFSRRTMG
     integer :: i_gas_model_lw = IGasModelIFSRRTMG
@@ -730,7 +740,7 @@ contains
          &  = [.false.,.false.,.false.,.false.,.false.,.false., &
          &     .false.,.false.,.false.,.false.,.false.,.false.]
     integer :: i_aerosol_type_map(NMaxAerosolTypes) ! More than 256 is an error
-
+    real(jprb) :: direct_acceptance_angle_deg(NDirectAcceptanceAngles)
     logical :: do_nearest_spectral_sw_albedo
     logical :: do_nearest_spectral_lw_emiss
     real(jprb) :: sw_albedo_wavelength_bound(NMaxAlbedoIntervals-1)
@@ -740,7 +750,8 @@ contains
     integer :: i_gas_model
 
     integer :: iunit ! Unit number of namelist file
-
+    integer :: jdir  ! Loop index for direct true components
+    
     namelist /radiation/ do_sw, do_lw, do_sw_direct, do_sw_direct_true, &
          &  do_3d_effects, do_lw_side_emissivity, do_clear, &
          &  do_save_radiative_properties, sw_entrapment_name, sw_encroachment_name, &
@@ -775,7 +786,8 @@ contains
          &  i_sw_albedo_index, i_lw_emiss_index, &
          &  do_cloud_aerosol_per_lw_g_point, &
          &  do_cloud_aerosol_per_sw_g_point, do_weighted_surface_mapping, &
-         &  use_spectral_solar_scaling, use_spectral_solar_cycle, use_updated_solar_spectrum
+         &  use_spectral_solar_scaling, use_spectral_solar_cycle, use_updated_solar_spectrum, &
+         &  direct_acceptance_angle_deg
 
     real(jphook) :: hook_handle
 
@@ -834,7 +846,8 @@ contains
     min_cloud_effective_size = this%min_cloud_effective_size
     cloud_type_name = this%cloud_type_name
     use_thick_cloud_spectral_averaging = this%use_thick_cloud_spectral_averaging
-
+    direct_acceptance_angle_deg = -1.0_jprb
+    direct_acceptance_angle_deg(1) = 0.0_jprb
     overhang_factor = this%overhang_factor
     encroachment_scaling = -1.0_jprb
     gas_model_name = '' !DefaultGasModelName
@@ -1023,7 +1036,20 @@ contains
     this%use_spectral_solar_scaling    = use_spectral_solar_scaling
     this%use_spectral_solar_cycle      = use_spectral_solar_cycle
     this%use_updated_solar_spectrum    = use_updated_solar_spectrum
-
+    this%direct_acceptance_angle_deg   = direct_acceptance_angle_deg
+    ! Count up non-zero direct acceptance angles
+    this%ndirect = 0
+    do jdir = 1,NDirectAcceptanceAngles
+      if (direct_acceptance_angle_deg(jdir) < 0.0_jprb) then
+        this%ndirect = jdir-1
+        exit
+      end if
+    end do
+    if (this%do_sw_direct_true .and. this%ndirect <= 0) then
+      write(nulerr,'(a)') '*** Error: True direct shortwave requested, but direct_acceptance_angle_deg does not contain non-negative values'
+      call radiation_abort('Radiation configuration error')
+    end if
+    
     if (do_save_gpoint_flux) then
       ! Saving the fluxes every g-point overrides saving as averaged
       ! in a band, but this%do_save_spectral_flux needs to be TRUE as

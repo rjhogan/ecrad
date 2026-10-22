@@ -287,9 +287,11 @@ contains
     real(jprb), dimension(config%n_bands_sw,nlev,istartcol:iendcol)   :: &
          &  od_sw_cloud, ssa_sw_cloud, g_sw_cloud
 
-    ! optional variables for shortwave direct radiation without delta-Eddington
+    ! Optional variables for shortwave direct radiation without
+    ! delta-Eddington: optical depths of cloud and gas/aerosol, and
+    ! the angular variance of forward scattered light from clouds
     real(jprb), dimension(config%n_bands_sw_if_direct_true,nlev,istartcol:iendcol)   :: &
-         &  od_sw_cloud_true
+         &  od_sw_cloud_true, theta2_cloud
     real(jprb), dimension(config%n_g_sw_if_direct_true,nlev,istartcol:iendcol)   :: &
          &  od_sw_true
 
@@ -393,7 +395,7 @@ contains
                &  config, thermodynamics, cloud, & 
                &  od_lw_cloud, ssa_lw_cloud, g_lw_cloud, &
                &  od_sw_cloud, ssa_sw_cloud, g_sw_cloud, &
-               &  od_sw_cloud_true)
+               &  od_sw_cloud_true, theta2_cloud)
         end if
       end if ! do_clouds
 
@@ -486,7 +488,7 @@ contains
                &  config, single_level, cloud, & 
                &  od_sw, ssa_sw, g_sw, od_sw_cloud, ssa_sw_cloud, &
                &  g_sw_cloud, sw_albedo_direct, sw_albedo_diffuse, &
-               &  incoming_sw, od_sw_true, od_sw_cloud_true, flux)
+               &  incoming_sw, od_sw_true, od_sw_cloud_true, theta2_cloud, flux)
         else if (config%i_solver_sw == ISolverSPARTACUS) then
           ! Compute fluxes using the SPARTACUS shortwave solver
           call solver_spartacus_sw(nlev,istartcol,iendcol, &
